@@ -1,13 +1,16 @@
 """Tkinter launcher and settings window for AirMouse."""
 
 import queue
+import sys
 import threading
 import tkinter as tk
 from tkinter import ttk
+import traceback
+from types import TracebackType
 from typing import Optional
 
-from app import run_camera_test
 from airmouse.config import AirMouseSettings, load_settings, save_settings
+from airmouse.tracking import run_camera_test
 
 
 class AirMouseLauncher:
@@ -130,6 +133,8 @@ class AirMouseLauncher:
             result = run_camera_test(stop_event=stop_event, settings=settings)
             self._messages.put(("finished", result))
         except Exception as error:
+            print("AirMouse tracking session failed:", file=sys.stderr)
+            traceback.print_exc()
             self._messages.put(("error", str(error)))
 
     def stop(self) -> None:
@@ -188,9 +193,37 @@ class AirMouseLauncher:
 
 def main() -> None:
     """Open the AirMouse launcher window."""
-    root = tk.Tk()
-    AirMouseLauncher(root)
-    root.mainloop()
+    root: Optional[tk.Tk] = None
+    try:
+        root = tk.Tk()
+
+        # Tkinter normally sends callback failures to stderr. Installing an
+        # explicit handler keeps that behavior clear in packaged test builds.
+        def log_callback_exception(
+            exception_type: type[BaseException],
+            exception: BaseException,
+            exception_traceback: Optional[TracebackType],
+        ) -> None:
+            print("AirMouse launcher callback failed:", file=sys.stderr)
+            traceback.print_exception(
+                exception_type,
+                exception,
+                exception_traceback,
+                file=sys.stderr,
+            )
+
+        root.report_callback_exception = log_callback_exception
+        AirMouseLauncher(root)
+        root.mainloop()
+    except Exception:
+        print("AirMouse launcher failed to initialize:", file=sys.stderr)
+        traceback.print_exc()
+        if root is not None:
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass
+        raise
 
 
 if __name__ == "__main__":

@@ -2,12 +2,13 @@
 
 from dataclasses import asdict, dataclass
 import json
-from pathlib import Path
 from typing import Any, Mapping
 
+from airmouse.resources import resource_path, settings_path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-SETTINGS_PATH = PROJECT_ROOT / "config" / "settings.json"
+
+BUNDLED_SETTINGS_PATH = resource_path("config", "settings.json")
+SETTINGS_PATH = settings_path()
 
 
 @dataclass
@@ -43,17 +44,23 @@ class AirMouseSettings:
 
 def load_settings() -> AirMouseSettings:
     """Load saved settings, falling back to defaults if the file is invalid."""
-    try:
-        values = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
-        if not isinstance(values, dict):
-            raise ValueError("settings must be a JSON object")
-        return AirMouseSettings.from_mapping(values)
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
-        return AirMouseSettings()
+    # A packaged app first checks the user's writable settings. If none exist,
+    # it reads the default settings bundled inside AirMouse.app.
+    paths = (SETTINGS_PATH, BUNDLED_SETTINGS_PATH)
+    for path in dict.fromkeys(paths):
+        try:
+            values = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(values, dict):
+                raise ValueError("settings must be a JSON object")
+            return AirMouseSettings.from_mapping(values)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+
+    return AirMouseSettings()
 
 
 def save_settings(settings: AirMouseSettings) -> None:
-    """Validate and save settings to config/settings.json."""
+    """Validate and save settings to the writable settings location."""
     validated_settings = settings.validated()
     SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     SETTINGS_PATH.write_text(

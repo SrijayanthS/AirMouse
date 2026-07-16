@@ -1,10 +1,11 @@
 """Hand detection and landmark drawing for AirMouse."""
 
-from pathlib import Path
 from typing import Any
 
 import cv2
 import mediapipe as mp
+
+from airmouse.resources import resource_path
 
 
 # MediaPipe landmark indexes connected by the bones of the hand.
@@ -32,7 +33,7 @@ HAND_CONNECTIONS = (
     (19, 20),
 )
 
-MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "hand_landmarker.task"
+MODEL_PATH = resource_path("models", "hand_landmarker.task")
 
 
 class HandTracker:

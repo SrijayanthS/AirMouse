@@ -1,3 +1,5 @@
 opencv-python
 mediapipe
 pyautogui
+pyinstaller
+pyobjc-framework-Quartz; sys_platform == "darwin"
