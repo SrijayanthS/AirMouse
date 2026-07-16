@@ -6,8 +6,10 @@ from typing import Optional, Protocol, Sequence
 
 
 LEFT_CLICK = "LEFT_CLICK"
+RIGHT_CLICK = "RIGHT_CLICK"
 THUMB_TIP = 4
 INDEX_FINGERTIP = 8
+MIDDLE_FINGERTIP = 12
 
 
 class Landmark(Protocol):
@@ -40,40 +42,71 @@ class GestureEngine:
 
         self._pinch_active = False
         self._last_click_time: Optional[float] = None
+        self._right_pinch_active = False
+        self._last_right_click_time: Optional[float] = None
 
     def detect(self, landmarks: Sequence[Landmark]) -> Optional[str]:
-        """Return LEFT_CLICK for a new thumb-and-index pinch, otherwise None."""
-        if len(landmarks) <= INDEX_FINGERTIP:
+        """Return one click event for a new fingertip pinch, otherwise None."""
+        if len(landmarks) <= MIDDLE_FINGERTIP:
             raise ValueError("Gesture detection requires all 21 hand landmarks")
 
         thumb_tip = landmarks[THUMB_TIP]
         index_tip = landmarks[INDEX_FINGERTIP]
+        middle_tip = landmarks[MIDDLE_FINGERTIP]
 
-        # MediaPipe supplies normalized coordinates, so this is a normalized
-        # two-dimensional distance between the fingertips.
-        distance = math.hypot(
+        # Thumb-to-index distance controls left click.
+        left_distance = math.hypot(
             thumb_tip.x - index_tip.x,
             thumb_tip.y - index_tip.y,
         )
 
-        # Separating the fingers beyond this threshold arms the next click.
-        if distance >= self.release_threshold:
+        # Thumb-to-middle distance controls right click independently.
+        right_distance = math.hypot(
+            thumb_tip.x - middle_tip.x,
+            thumb_tip.y - middle_tip.y,
+        )
+
+        # Separating either finger pair arms that gesture for its next click.
+        if left_distance >= self.release_threshold:
             self._pinch_active = False
+        if right_distance >= self.release_threshold:
+            self._right_pinch_active = False
+
+        new_left_pinch = (
+            not self._pinch_active and left_distance <= self.pinch_threshold
+        )
+        new_right_pinch = (
+            not self._right_pinch_active and right_distance <= self.pinch_threshold
+        )
+
+        # Latch both new pinches, even when left-click priority resolves an
+        # ambiguous frame. This prevents the held right pinch firing next frame.
+        if new_left_pinch:
+            self._pinch_active = True
+        if new_right_pinch:
+            self._right_pinch_active = True
+
+        if not new_left_pinch and not new_right_pinch:
             return None
 
-        # A held pinch remains active and must not create repeated clicks.
-        if self._pinch_active or distance > self.pinch_threshold:
-            return None
-
-        self._pinch_active = True
         current_time = time.monotonic()
 
-        # The cooldown filters out pinches that happen too soon after a click.
+        # Check left click first so it wins when both pinches are detected.
+        if new_left_pinch:
+            if (
+                self._last_click_time is not None
+                and current_time - self._last_click_time < self.cooldown_seconds
+            ):
+                return None
+
+            self._last_click_time = current_time
+            return LEFT_CLICK
+
         if (
-            self._last_click_time is not None
-            and current_time - self._last_click_time < self.cooldown_seconds
+            self._last_right_click_time is not None
+            and current_time - self._last_right_click_time < self.cooldown_seconds
         ):
             return None
 
-        self._last_click_time = current_time
-        return LEFT_CLICK
+        self._last_right_click_time = current_time
+        return RIGHT_CLICK

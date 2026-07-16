@@ -4,7 +4,7 @@ import time
 import cv2
 
 from airmouse.cursor_controller import CursorController
-from airmouse.gesture_engine import LEFT_CLICK, GestureEngine
+from airmouse.gesture_engine import LEFT_CLICK, RIGHT_CLICK, GestureEngine
 from airmouse.hand_tracker import HandTracker
 
 
@@ -21,6 +21,7 @@ def run_camera_test() -> int:
     camera = cv2.VideoCapture(0)
     last_timestamp_ms = -1
     click_message_until = 0.0
+    click_message = ""
 
     try:
         # Make sure the webcam is available before entering the display loop.
@@ -58,6 +59,11 @@ def run_camera_test() -> int:
                 event = gesture_engine.detect(first_hand_landmarks)
                 if event == LEFT_CLICK:
                     cursor.left_click()
+                    click_message = "LEFT CLICK"
+                    click_message_until = time.monotonic() + CLICK_MESSAGE_SECONDS
+                elif event == RIGHT_CLICK:
+                    cursor.right_click()
+                    click_message = "RIGHT CLICK"
                     click_message_until = time.monotonic() + CLICK_MESSAGE_SECONDS
 
             # Draw the detected hand landmarks on the camera frame.
@@ -74,11 +80,11 @@ def run_camera_test() -> int:
                 2,
             )
 
-            # Briefly confirm a recognized left-click gesture on the preview.
+            # Briefly confirm the recognized click gesture on the preview.
             if time.monotonic() < click_message_until:
                 cv2.putText(
                     frame,
-                    "LEFT CLICK",
+                    click_message,
                     (10, 60),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.7,
