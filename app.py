@@ -4,7 +4,13 @@ import time
 import cv2
 
 from airmouse.cursor_controller import CursorController
-from airmouse.gesture_engine import LEFT_CLICK, RIGHT_CLICK, GestureEngine
+from airmouse.gesture_engine import (
+    DRAG_END,
+    DRAG_START,
+    LEFT_CLICK,
+    RIGHT_CLICK,
+    GestureEngine,
+)
 from airmouse.hand_tracker import HandTracker
 
 
@@ -22,6 +28,7 @@ def run_camera_test() -> int:
     last_timestamp_ms = -1
     click_message_until = 0.0
     click_message = ""
+    dragging = False
 
     try:
         # Make sure the webcam is available before entering the display loop.
@@ -33,6 +40,8 @@ def run_camera_test() -> int:
             return 1
 
         while True:
+            gesture_debug_text = ""
+
             # Read one frame from the webcam.
             success, frame = camera.read()
             if not success:
@@ -50,13 +59,11 @@ def run_camera_test() -> int:
             # Detect one hand in the mirrored frame.
             results = tracker.detect(frame, timestamp_ms)
 
-            # Landmark 8 is the tip of the index finger.
             if results.hand_landmarks:
                 first_hand_landmarks = results.hand_landmarks[0]
-                index_fingertip = first_hand_landmarks[8]
-                cursor.move(index_fingertip.x, index_fingertip.y)
-
                 event = gesture_engine.detect(first_hand_landmarks)
+                gesture_debug_text = gesture_engine.debug_text
+
                 if event == LEFT_CLICK:
                     cursor.left_click()
                     click_message = "LEFT CLICK"
@@ -65,6 +72,18 @@ def run_camera_test() -> int:
                     cursor.right_click()
                     click_message = "RIGHT CLICK"
                     click_message_until = time.monotonic() + CLICK_MESSAGE_SECONDS
+                elif event == DRAG_START:
+                    print("DRAG_START event received")
+                    cursor.drag_start()
+                    dragging = True
+                elif event == DRAG_END:
+                    print("DRAG_END event received")
+                    cursor.drag_end()
+                    dragging = False
+
+                # Landmark 8 remains the pointer before, during, and after drag.
+                index_fingertip = first_hand_landmarks[8]
+                cursor.move(index_fingertip.x, index_fingertip.y)
 
             # Draw the detected hand landmarks on the camera frame.
             tracker.draw(frame, results)
@@ -92,6 +111,17 @@ def run_camera_test() -> int:
                     2,
                 )
 
+            if gesture_debug_text:
+                cv2.putText(
+                    frame,
+                    gesture_debug_text,
+                    (10, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 165, 255),
+                    2,
+                )
+
             # Show the live video in a window.
             cv2.imshow(WINDOW_TITLE, frame)
 
@@ -99,14 +129,14 @@ def run_camera_test() -> int:
             if cv2.waitKey(1) & 0xFF == QUIT_KEY:
                 break
     finally:
-        # Always release the camera so the device is not left hanging.
-        camera.release()
-
-        # Always close any OpenCV windows that were opened.
-        cv2.destroyAllWindows()
-
-        # Always release resources used by MediaPipe Hands.
-        tracker.close()
+        try:
+            # Always release the mouse button, including after Q or an error.
+            cursor.drag_end()
+        finally:
+            # Camera cleanup still runs if releasing the mouse reports an error.
+            camera.release()
+            cv2.destroyAllWindows()
+            tracker.close()
 
     return 0
 

@@ -7,9 +7,12 @@ from typing import Optional, Protocol, Sequence
 
 LEFT_CLICK = "LEFT_CLICK"
 RIGHT_CLICK = "RIGHT_CLICK"
+DRAG_START = "DRAG_START"
+DRAG_END = "DRAG_END"
 THUMB_TIP = 4
 INDEX_FINGERTIP = 8
 MIDDLE_FINGERTIP = 12
+RING_FINGERTIP = 16
 
 
 class Landmark(Protocol):
@@ -20,7 +23,7 @@ class Landmark(Protocol):
 
 
 class GestureEngine:
-    """Recognize gestures from a sequence of hand landmarks."""
+    """Recognize click and drag gestures from hand landmarks."""
 
     def __init__(
         self,
@@ -28,7 +31,7 @@ class GestureEngine:
         release_threshold: float = 0.08,
         cooldown_seconds: float = 0.35,
     ) -> None:
-        """Configure the pinch distances and delay between click events."""
+        """Configure the pinch distances and click cooldown."""
         if pinch_threshold < 0:
             raise ValueError("pinch_threshold cannot be negative")
         if release_threshold <= pinch_threshold:
@@ -40,68 +43,94 @@ class GestureEngine:
         self.release_threshold = release_threshold
         self.cooldown_seconds = cooldown_seconds
 
-        self._pinch_active = False
-        self._last_click_time: Optional[float] = None
+        self._left_pinch_active = False
         self._right_pinch_active = False
+        self._drag_active = False
+        self._last_left_click_time: Optional[float] = None
         self._last_right_click_time: Optional[float] = None
+        self._suppress_left_until_release = False
+        self._suppress_right_until_release = False
+        self.debug_text = ""
+
+    @staticmethod
+    def _distance(first: Landmark, second: Landmark) -> float:
+        """Return the normalized two-dimensional distance between landmarks."""
+        return math.hypot(first.x - second.x, first.y - second.y)
 
     def detect(self, landmarks: Sequence[Landmark]) -> Optional[str]:
-        """Return one click event for a new fingertip pinch, otherwise None."""
-        if len(landmarks) <= MIDDLE_FINGERTIP:
+        """Return one click or drag event, otherwise None."""
+        self.debug_text = ""
+
+        if len(landmarks) <= RING_FINGERTIP:
             raise ValueError("Gesture detection requires all 21 hand landmarks")
 
         thumb_tip = landmarks[THUMB_TIP]
-        index_tip = landmarks[INDEX_FINGERTIP]
-        middle_tip = landmarks[MIDDLE_FINGERTIP]
-
-        # Thumb-to-index distance controls left click.
-        left_distance = math.hypot(
-            thumb_tip.x - index_tip.x,
-            thumb_tip.y - index_tip.y,
-        )
-
-        # Thumb-to-middle distance controls right click independently.
-        right_distance = math.hypot(
-            thumb_tip.x - middle_tip.x,
-            thumb_tip.y - middle_tip.y,
-        )
-
-        # Separating either finger pair arms that gesture for its next click.
-        if left_distance >= self.release_threshold:
-            self._pinch_active = False
-        if right_distance >= self.release_threshold:
-            self._right_pinch_active = False
-
-        new_left_pinch = (
-            not self._pinch_active and left_distance <= self.pinch_threshold
-        )
-        new_right_pinch = (
-            not self._right_pinch_active and right_distance <= self.pinch_threshold
-        )
-
-        # Latch both new pinches, even when left-click priority resolves an
-        # ambiguous frame. This prevents the held right pinch firing next frame.
-        if new_left_pinch:
-            self._pinch_active = True
-        if new_right_pinch:
-            self._right_pinch_active = True
-
-        if not new_left_pinch and not new_right_pinch:
-            return None
-
+        left_distance = self._distance(thumb_tip, landmarks[INDEX_FINGERTIP])
+        right_distance = self._distance(thumb_tip, landmarks[MIDDLE_FINGERTIP])
+        drag_distance = self._distance(thumb_tip, landmarks[RING_FINGERTIP])
         current_time = time.monotonic()
 
-        # Check left click first so it wins when both pinches are detected.
-        if new_left_pinch:
+        # Drag has priority over both click gestures while the ring pinch is held.
+        if self._drag_active:
+            if drag_distance >= self.release_threshold:
+                self._drag_active = False
+                self._suppress_left_until_release = (
+                    left_distance < self.release_threshold
+                )
+                self._suppress_right_until_release = (
+                    right_distance < self.release_threshold
+                )
+                self.debug_text = "DRAG END"
+                return DRAG_END
+
+            self.debug_text = "DRAGGING"
+            return None
+
+        # A new thumb-ring pinch begins dragging immediately and only once.
+        if drag_distance <= self.pinch_threshold:
+            self._drag_active = True
+            self._left_pinch_active = False
+            self._right_pinch_active = False
+            self.debug_text = "DRAG START"
+            return DRAG_START
+
+        # Ignore click fingers that are still pinched when a drag ends.
+        if self._suppress_left_until_release:
+            if left_distance >= self.release_threshold:
+                self._suppress_left_until_release = False
+            return None
+        if self._suppress_right_until_release:
+            if right_distance >= self.release_threshold:
+                self._suppress_right_until_release = False
+            return None
+
+        # Thumb-index remains a short pinch-and-release left click.
+        if self._left_pinch_active:
+            if left_distance < self.release_threshold:
+                return None
+
+            self._left_pinch_active = False
             if (
-                self._last_click_time is not None
-                and current_time - self._last_click_time < self.cooldown_seconds
+                self._last_left_click_time is not None
+                and current_time - self._last_left_click_time < self.cooldown_seconds
             ):
                 return None
 
-            self._last_click_time = current_time
+            self._last_left_click_time = current_time
             return LEFT_CLICK
 
+        if left_distance <= self.pinch_threshold:
+            self._left_pinch_active = True
+            return None
+
+        # Thumb-middle keeps its independent, one-shot right-click latch.
+        if right_distance >= self.release_threshold:
+            self._right_pinch_active = False
+
+        if self._right_pinch_active or right_distance > self.pinch_threshold:
+            return None
+
+        self._right_pinch_active = True
         if (
             self._last_right_click_time is not None
             and current_time - self._last_right_click_time < self.cooldown_seconds
