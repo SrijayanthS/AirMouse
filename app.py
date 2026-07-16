@@ -3,6 +3,7 @@ import time
 
 import cv2
 
+from airmouse.cursor_controller import CursorController
 from airmouse.hand_tracker import HandTracker
 
 
@@ -13,6 +14,7 @@ QUIT_KEY = ord("q")
 def run_camera_test() -> int:
     """Open the webcam, show hand landmarks, and exit on 'q'."""
     tracker = HandTracker()
+    cursor = CursorController()
     camera = cv2.VideoCapture(0)
     last_timestamp_ms = -1
 
@@ -40,8 +42,15 @@ def run_camera_test() -> int:
             timestamp_ms = max(current_time_ms, last_timestamp_ms + 1)
             last_timestamp_ms = timestamp_ms
 
-            # Detect one hand and draw its landmarks on the mirrored frame.
+            # Detect one hand in the mirrored frame.
             results = tracker.detect(frame, timestamp_ms)
+
+            # Landmark 8 is the tip of the index finger.
+            if results.hand_landmarks:
+                index_fingertip = results.hand_landmarks[0][8]
+                cursor.move(index_fingertip.x, index_fingertip.y)
+
+            # Draw the detected hand landmarks on the camera frame.
             tracker.draw(frame, results)
 
             # Add a simple on-screen hint for the user.
