@@ -1,8 +1,11 @@
 import sys
+import threading
 import time
+from typing import Optional
 
 import cv2
 
+from airmouse.config import AirMouseSettings, load_settings
 from airmouse.cursor_controller import CursorController
 from airmouse.gesture_engine import (
     DOUBLE_CLICK,
@@ -25,12 +28,15 @@ QUIT_KEY = ord("q")
 CLICK_MESSAGE_SECONDS = 0.5
 
 
-def run_camera_test() -> int:
+def run_camera_test(
+    stop_event: Optional[threading.Event] = None,
+    settings: Optional[AirMouseSettings] = None,
+) -> int:
     """Open the webcam, show hand landmarks, and exit on 'q'."""
-    tracker = HandTracker()
-    cursor = CursorController()
-    gesture_engine = GestureEngine()
-    camera = cv2.VideoCapture(0)
+    active_settings = settings or load_settings()
+    tracker = None
+    cursor = None
+    camera = None
     last_timestamp_ms = -1
     click_message_until = 0.0
     click_message = ""
@@ -39,6 +45,15 @@ def run_camera_test() -> int:
     control_enabled = True
 
     try:
+        tracker = HandTracker()
+        cursor = CursorController(
+            smoothing_factor=active_settings.cursor_smoothing,
+        )
+        gesture_engine = GestureEngine(
+            pinch_threshold=active_settings.pinch_sensitivity,
+        )
+        camera = cv2.VideoCapture(0)
+
         # Make sure the webcam is available before entering the display loop.
         if not camera.isOpened():
             print(
@@ -48,6 +63,9 @@ def run_camera_test() -> int:
             return 1
 
         while True:
+            if stop_event is not None and stop_event.is_set():
+                break
+
             gesture_debug_text = ""
 
             # Read one frame from the webcam.
@@ -109,10 +127,10 @@ def run_camera_test() -> int:
                     elif event == SCROLL_START:
                         scrolling = True
                     elif event == SCROLL_UP:
-                        cursor.scroll(2)
+                        cursor.scroll(active_settings.scroll_sensitivity)
                         scrolling = True
                     elif event == SCROLL_DOWN:
-                        cursor.scroll(-2)
+                        cursor.scroll(-active_settings.scroll_sensitivity)
                         scrolling = True
                     elif event == SCROLL_END:
                         scrolling = False
@@ -181,12 +199,18 @@ def run_camera_test() -> int:
     finally:
         try:
             # Always release the mouse button, including after Q or an error.
-            cursor.drag_end()
+            if cursor is not None:
+                cursor.drag_end()
         finally:
-            # Camera cleanup still runs if releasing the mouse reports an error.
-            camera.release()
-            cv2.destroyAllWindows()
-            tracker.close()
+            try:
+                if camera is not None:
+                    camera.release()
+            finally:
+                try:
+                    cv2.destroyAllWindows()
+                finally:
+                    if tracker is not None:
+                        tracker.close()
 
     return 0
 
