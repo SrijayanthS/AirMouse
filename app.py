@@ -14,6 +14,7 @@ from airmouse.gesture_engine import (
     SCROLL_END,
     SCROLL_START,
     SCROLL_UP,
+    TOGGLE_CONTROL,
     GestureEngine,
 )
 from airmouse.hand_tracker import HandTracker
@@ -35,6 +36,7 @@ def run_camera_test() -> int:
     click_message = ""
     dragging = False
     scrolling = False
+    control_enabled = True
 
     try:
         # Make sure the webcam is available before entering the display loop.
@@ -70,40 +72,54 @@ def run_camera_test() -> int:
                 event = gesture_engine.detect(first_hand_landmarks)
                 gesture_debug_text = gesture_engine.debug_text
 
-                if event == LEFT_CLICK:
-                    cursor.left_click()
-                    click_message = "LEFT CLICK"
-                    click_message_until = time.monotonic() + CLICK_MESSAGE_SECONDS
-                elif event == DOUBLE_CLICK:
-                    cursor.double_click()
-                    click_message = "DOUBLE CLICK"
-                    click_message_until = time.monotonic() + CLICK_MESSAGE_SECONDS
-                elif event == RIGHT_CLICK:
-                    cursor.right_click()
-                    click_message = "RIGHT CLICK"
-                    click_message_until = time.monotonic() + CLICK_MESSAGE_SECONDS
-                elif event == DRAG_START:
-                    print("DRAG_START event received")
-                    cursor.drag_start()
-                    dragging = True
-                elif event == DRAG_END:
-                    print("DRAG_END event received")
-                    cursor.drag_end()
-                    dragging = False
-                elif event == SCROLL_START:
-                    scrolling = True
-                elif event == SCROLL_UP:
-                    cursor.scroll(2)
-                    scrolling = True
-                elif event == SCROLL_DOWN:
-                    cursor.scroll(-2)
-                    scrolling = True
-                elif event == SCROLL_END:
-                    scrolling = False
+                if event == TOGGLE_CONTROL:
+                    control_enabled = not control_enabled
+                    if not control_enabled:
+                        cursor.drag_end()
+                        dragging = False
+                        scrolling = False
+                        click_message_until = 0.0
+                elif control_enabled:
+                    if event == LEFT_CLICK:
+                        cursor.left_click()
+                        click_message = "LEFT CLICK"
+                        click_message_until = (
+                            time.monotonic() + CLICK_MESSAGE_SECONDS
+                        )
+                    elif event == DOUBLE_CLICK:
+                        cursor.double_click()
+                        click_message = "DOUBLE CLICK"
+                        click_message_until = (
+                            time.monotonic() + CLICK_MESSAGE_SECONDS
+                        )
+                    elif event == RIGHT_CLICK:
+                        cursor.right_click()
+                        click_message = "RIGHT CLICK"
+                        click_message_until = (
+                            time.monotonic() + CLICK_MESSAGE_SECONDS
+                        )
+                    elif event == DRAG_START:
+                        print("DRAG_START event received")
+                        cursor.drag_start()
+                        dragging = True
+                    elif event == DRAG_END:
+                        print("DRAG_END event received")
+                        cursor.drag_end()
+                        dragging = False
+                    elif event == SCROLL_START:
+                        scrolling = True
+                    elif event == SCROLL_UP:
+                        cursor.scroll(2)
+                        scrolling = True
+                    elif event == SCROLL_DOWN:
+                        cursor.scroll(-2)
+                        scrolling = True
+                    elif event == SCROLL_END:
+                        scrolling = False
 
                 # Scroll mode owns vertical hand movement, so pointer movement
                 # pauses until SCROLL_END is received.
-                if not scrolling:
+                if control_enabled and not scrolling:
                     index_fingertip = first_hand_landmarks[8]
                     cursor.move(index_fingertip.x, index_fingertip.y)
 
@@ -143,6 +159,18 @@ def run_camera_test() -> int:
                     (0, 165, 255),
                     2,
                 )
+
+            control_status = "CONTROL ACTIVE" if control_enabled else "PAUSED"
+            control_color = (0, 255, 0) if control_enabled else (0, 0, 255)
+            cv2.putText(
+                frame,
+                control_status,
+                (10, 120),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                control_color,
+                2,
+            )
 
             # Show the live video in a window.
             cv2.imshow(WINDOW_TITLE, frame)

@@ -14,6 +14,7 @@ SCROLL_START = "SCROLL_START"
 SCROLL_UP = "SCROLL_UP"
 SCROLL_DOWN = "SCROLL_DOWN"
 SCROLL_END = "SCROLL_END"
+TOGGLE_CONTROL = "TOGGLE_CONTROL"
 THUMB_TIP = 4
 INDEX_PIP = 6
 INDEX_FINGERTIP = 8
@@ -44,8 +45,9 @@ class GestureEngine:
         cooldown_seconds: float = 0.35,
         scroll_dead_zone: float = 0.02,
         scroll_interval: float = 0.12,
+        fist_hold_seconds: float = 1.0,
     ) -> None:
-        """Configure pinch, click, and scroll sensitivity."""
+        """Configure pinch, scroll, and fist timing."""
         if pinch_threshold < 0:
             raise ValueError("pinch_threshold cannot be negative")
         if release_threshold <= pinch_threshold:
@@ -56,12 +58,15 @@ class GestureEngine:
             raise ValueError("scroll_dead_zone cannot be negative")
         if scroll_interval < 0:
             raise ValueError("scroll_interval cannot be negative")
+        if fist_hold_seconds <= 0:
+            raise ValueError("fist_hold_seconds must be greater than zero")
 
         self.pinch_threshold = pinch_threshold
         self.release_threshold = release_threshold
         self.cooldown_seconds = cooldown_seconds
         self.scroll_dead_zone = scroll_dead_zone
         self.scroll_interval = scroll_interval
+        self.fist_hold_seconds = fist_hold_seconds
 
         self._left_pinch_active = False
         self._right_pinch_active = False
@@ -70,6 +75,8 @@ class GestureEngine:
         self._scroll_active = False
         self._previous_scroll_y: Optional[float] = None
         self._last_scroll_time: Optional[float] = None
+        self._fist_started_at: Optional[float] = None
+        self._fist_latched = False
         self._last_left_click_time: Optional[float] = None
         self._last_right_click_time: Optional[float] = None
         self._suppress_left_until_release = False
@@ -103,6 +110,33 @@ class GestureEngine:
         )
         return index_extended and middle_extended and ring_folded and little_folded
 
+    @staticmethod
+    def _is_closed_fist(landmarks: Sequence[Landmark]) -> bool:
+        """Return whether all four fingertips are folded toward the palm."""
+        return (
+            landmarks[INDEX_FINGERTIP].y
+            > landmarks[INDEX_PIP].y + FINGER_STATE_MARGIN
+            and landmarks[MIDDLE_FINGERTIP].y
+            > landmarks[MIDDLE_PIP].y + FINGER_STATE_MARGIN
+            and landmarks[RING_FINGERTIP].y
+            > landmarks[RING_PIP].y + FINGER_STATE_MARGIN
+            and landmarks[LITTLE_FINGERTIP].y
+            > landmarks[LITTLE_PIP].y + FINGER_STATE_MARGIN
+        )
+
+    def _clear_action_states(self) -> None:
+        """Clear click, drag, and scroll latches after a control toggle."""
+        self._left_pinch_active = False
+        self._right_pinch_active = False
+        self._double_pinch_active = False
+        self._drag_active = False
+        self._scroll_active = False
+        self._previous_scroll_y = None
+        self._last_scroll_time = None
+        self._suppress_left_until_release = False
+        self._suppress_right_until_release = False
+        self._suppress_double_until_release = False
+
     def detect(self, landmarks: Sequence[Landmark]) -> Optional[str]:
         """Return one click or drag event, otherwise None."""
         self.debug_text = ""
@@ -117,6 +151,31 @@ class GestureEngine:
         double_distance = self._distance(thumb_tip, landmarks[LITTLE_FINGERTIP])
         current_time = time.monotonic()
         scroll_pose = self._is_scroll_pose(landmarks)
+        closed_fist = self._is_closed_fist(landmarks)
+
+        # A fist has top priority so no action gesture fires while it is held.
+        if closed_fist:
+            if self._fist_latched:
+                self.debug_text = "FIST HELD"
+                return None
+
+            if self._fist_started_at is None:
+                self._fist_started_at = current_time
+                self.debug_text = "HOLD FIST"
+                return None
+
+            if current_time - self._fist_started_at >= self.fist_hold_seconds:
+                self._fist_latched = True
+                self._clear_action_states()
+                self.debug_text = "CONTROL TOGGLE"
+                return TOGGLE_CONTROL
+
+            self.debug_text = "HOLD FIST"
+            return None
+
+        # Opening any finger re-arms the fist for a future toggle.
+        self._fist_started_at = None
+        self._fist_latched = False
 
         # Drag has priority over both click gestures while the ring pinch is held.
         if self._drag_active:
