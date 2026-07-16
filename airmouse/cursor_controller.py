@@ -1,8 +1,15 @@
 """Cursor movement for AirMouse."""
 
+import sys
+import time
 from typing import Optional
 
 import pyautogui
+
+if sys.platform == "darwin":
+    import Quartz
+else:
+    Quartz = None
 
 
 class CursorController:
@@ -60,6 +67,42 @@ class CursorController:
     def left_click(self) -> None:
         """Perform one left mouse-button click."""
         pyautogui.click()
+
+    def double_click(self) -> None:
+        """Perform one double left click."""
+        current_x, current_y = pyautogui.position()
+
+        if sys.platform != "darwin":
+            pyautogui.doubleClick(
+                x=current_x,
+                y=current_y,
+                button="left",
+                interval=0.08,
+            )
+            return
+
+        cursor_position = (current_x, current_y)
+
+        def post_left_mouse_event(event_type: int, click_state: int) -> None:
+            """Create and post one left-button event at the saved position."""
+            event = Quartz.CGEventCreateMouseEvent(
+                None,
+                event_type,
+                cursor_position,
+                Quartz.kCGMouseButtonLeft,
+            )
+            Quartz.CGEventSetIntegerValueField(
+                event,
+                Quartz.kCGMouseEventClickState,
+                click_state,
+            )
+            Quartz.CGEventPost(Quartz.kCGHIDEventTap, event)
+
+        post_left_mouse_event(Quartz.kCGEventLeftMouseDown, 1)
+        post_left_mouse_event(Quartz.kCGEventLeftMouseUp, 1)
+        time.sleep(0.08)
+        post_left_mouse_event(Quartz.kCGEventLeftMouseDown, 2)
+        post_left_mouse_event(Quartz.kCGEventLeftMouseUp, 2)
 
     def right_click(self) -> None:
         """Perform one right mouse-button click."""

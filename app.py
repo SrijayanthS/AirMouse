@@ -5,6 +5,7 @@ import cv2
 
 from airmouse.cursor_controller import CursorController
 from airmouse.gesture_engine import (
+    DOUBLE_CLICK,
     DRAG_END,
     DRAG_START,
     LEFT_CLICK,
@@ -67,6 +68,10 @@ def run_camera_test() -> int:
                 if event == LEFT_CLICK:
                     cursor.left_click()
                     click_message = "LEFT CLICK"
+                    click_message_until = time.monotonic() + CLICK_MESSAGE_SECONDS
+                elif event == DOUBLE_CLICK:
+                    cursor.double_click()
+                    click_message = "DOUBLE CLICK"
                     click_message_until = time.monotonic() + CLICK_MESSAGE_SECONDS
                 elif event == RIGHT_CLICK:
                     cursor.right_click()
