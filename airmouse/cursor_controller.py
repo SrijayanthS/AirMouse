@@ -43,6 +43,10 @@ class CursorController:
 
         pyautogui.moveTo(smoothed_x, smoothed_y)
 
+    def left_click(self) -> None:
+        """Perform one left mouse-button click."""
+        pyautogui.click()
+
     def reset(self) -> None:
         """Clear the saved cursor position used by smoothing."""
         self.previous_x = None

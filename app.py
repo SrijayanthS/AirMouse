@@ -4,19 +4,23 @@ import time
 import cv2
 
 from airmouse.cursor_controller import CursorController
+from airmouse.gesture_engine import LEFT_CLICK, GestureEngine
 from airmouse.hand_tracker import HandTracker
 
 
 WINDOW_TITLE = "AirMouse - Camera Test"
 QUIT_KEY = ord("q")
+CLICK_MESSAGE_SECONDS = 0.5
 
 
 def run_camera_test() -> int:
     """Open the webcam, show hand landmarks, and exit on 'q'."""
     tracker = HandTracker()
     cursor = CursorController()
+    gesture_engine = GestureEngine()
     camera = cv2.VideoCapture(0)
     last_timestamp_ms = -1
+    click_message_until = 0.0
 
     try:
         # Make sure the webcam is available before entering the display loop.
@@ -47,8 +51,14 @@ def run_camera_test() -> int:
 
             # Landmark 8 is the tip of the index finger.
             if results.hand_landmarks:
-                index_fingertip = results.hand_landmarks[0][8]
+                first_hand_landmarks = results.hand_landmarks[0]
+                index_fingertip = first_hand_landmarks[8]
                 cursor.move(index_fingertip.x, index_fingertip.y)
+
+                event = gesture_engine.detect(first_hand_landmarks)
+                if event == LEFT_CLICK:
+                    cursor.left_click()
+                    click_message_until = time.monotonic() + CLICK_MESSAGE_SECONDS
 
             # Draw the detected hand landmarks on the camera frame.
             tracker.draw(frame, results)
@@ -63,6 +73,18 @@ def run_camera_test() -> int:
                 (255, 255, 255),
                 2,
             )
+
+            # Briefly confirm a recognized left-click gesture on the preview.
+            if time.monotonic() < click_message_until:
+                cv2.putText(
+                    frame,
+                    "LEFT CLICK",
+                    (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 0),
+                    2,
+                )
 
             # Show the live video in a window.
             cv2.imshow(WINDOW_TITLE, frame)
