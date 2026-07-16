@@ -51,12 +51,12 @@ python app.py
 
 - [x] Camera integration
 - [x] AI hand tracking
-- [ ] Cursor movement
-- [ ] Cursor smoothing
-- [ ] Left click
-- [ ] Right click
-- [ ] Drag and drop
-- [ ] Scrolling
+- [x] Cursor movement
+- [x] Cursor smoothing
+- [x] Left click
+- [x] Right click
+- [x] Drag and drop
+- [x] Scrolling
 - [ ] Custom gestures
 
 ---
