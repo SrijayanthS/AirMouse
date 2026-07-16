@@ -10,6 +10,10 @@ from airmouse.gesture_engine import (
     DRAG_START,
     LEFT_CLICK,
     RIGHT_CLICK,
+    SCROLL_DOWN,
+    SCROLL_END,
+    SCROLL_START,
+    SCROLL_UP,
     GestureEngine,
 )
 from airmouse.hand_tracker import HandTracker
@@ -30,6 +34,7 @@ def run_camera_test() -> int:
     click_message_until = 0.0
     click_message = ""
     dragging = False
+    scrolling = False
 
     try:
         # Make sure the webcam is available before entering the display loop.
@@ -85,10 +90,22 @@ def run_camera_test() -> int:
                     print("DRAG_END event received")
                     cursor.drag_end()
                     dragging = False
+                elif event == SCROLL_START:
+                    scrolling = True
+                elif event == SCROLL_UP:
+                    cursor.scroll(2)
+                    scrolling = True
+                elif event == SCROLL_DOWN:
+                    cursor.scroll(-2)
+                    scrolling = True
+                elif event == SCROLL_END:
+                    scrolling = False
 
-                # Landmark 8 remains the pointer before, during, and after drag.
-                index_fingertip = first_hand_landmarks[8]
-                cursor.move(index_fingertip.x, index_fingertip.y)
+                # Scroll mode owns vertical hand movement, so pointer movement
+                # pauses until SCROLL_END is received.
+                if not scrolling:
+                    index_fingertip = first_hand_landmarks[8]
+                    cursor.move(index_fingertip.x, index_fingertip.y)
 
             # Draw the detected hand landmarks on the camera frame.
             tracker.draw(frame, results)

@@ -108,6 +108,10 @@ class CursorController:
         """Perform one right mouse-button click."""
         pyautogui.rightClick()
 
+    def scroll(self, amount: int) -> None:
+        """Scroll vertically by a small signed amount."""
+        pyautogui.scroll(amount)
+
     def drag_start(self) -> None:
         """Press and hold the left mouse button to begin dragging."""
         if not self._drag_active:

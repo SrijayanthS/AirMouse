@@ -10,11 +10,21 @@ DOUBLE_CLICK = "DOUBLE_CLICK"
 RIGHT_CLICK = "RIGHT_CLICK"
 DRAG_START = "DRAG_START"
 DRAG_END = "DRAG_END"
+SCROLL_START = "SCROLL_START"
+SCROLL_UP = "SCROLL_UP"
+SCROLL_DOWN = "SCROLL_DOWN"
+SCROLL_END = "SCROLL_END"
 THUMB_TIP = 4
+INDEX_PIP = 6
 INDEX_FINGERTIP = 8
+PALM_ANCHOR = 9
+MIDDLE_PIP = 10
 MIDDLE_FINGERTIP = 12
+RING_PIP = 14
 RING_FINGERTIP = 16
+LITTLE_PIP = 18
 LITTLE_FINGERTIP = 20
+FINGER_STATE_MARGIN = 0.02
 
 
 class Landmark(Protocol):
@@ -32,23 +42,34 @@ class GestureEngine:
         pinch_threshold: float = 0.05,
         release_threshold: float = 0.08,
         cooldown_seconds: float = 0.35,
+        scroll_dead_zone: float = 0.02,
+        scroll_interval: float = 0.12,
     ) -> None:
-        """Configure pinch distances and click cooldown."""
+        """Configure pinch, click, and scroll sensitivity."""
         if pinch_threshold < 0:
             raise ValueError("pinch_threshold cannot be negative")
         if release_threshold <= pinch_threshold:
             raise ValueError("release_threshold must be greater than pinch_threshold")
         if cooldown_seconds < 0:
             raise ValueError("cooldown_seconds cannot be negative")
+        if scroll_dead_zone < 0:
+            raise ValueError("scroll_dead_zone cannot be negative")
+        if scroll_interval < 0:
+            raise ValueError("scroll_interval cannot be negative")
 
         self.pinch_threshold = pinch_threshold
         self.release_threshold = release_threshold
         self.cooldown_seconds = cooldown_seconds
+        self.scroll_dead_zone = scroll_dead_zone
+        self.scroll_interval = scroll_interval
 
         self._left_pinch_active = False
         self._right_pinch_active = False
         self._double_pinch_active = False
         self._drag_active = False
+        self._scroll_active = False
+        self._previous_scroll_y: Optional[float] = None
+        self._last_scroll_time: Optional[float] = None
         self._last_left_click_time: Optional[float] = None
         self._last_right_click_time: Optional[float] = None
         self._suppress_left_until_release = False
@@ -60,6 +81,27 @@ class GestureEngine:
     def _distance(first: Landmark, second: Landmark) -> float:
         """Return the normalized two-dimensional distance between landmarks."""
         return math.hypot(first.x - second.x, first.y - second.y)
+
+    @staticmethod
+    def _is_scroll_pose(landmarks: Sequence[Landmark]) -> bool:
+        """Return whether index/middle are up and ring/little are folded."""
+        index_extended = (
+            landmarks[INDEX_FINGERTIP].y
+            < landmarks[INDEX_PIP].y - FINGER_STATE_MARGIN
+        )
+        middle_extended = (
+            landmarks[MIDDLE_FINGERTIP].y
+            < landmarks[MIDDLE_PIP].y - FINGER_STATE_MARGIN
+        )
+        ring_folded = (
+            landmarks[RING_FINGERTIP].y
+            > landmarks[RING_PIP].y + FINGER_STATE_MARGIN
+        )
+        little_folded = (
+            landmarks[LITTLE_FINGERTIP].y
+            > landmarks[LITTLE_PIP].y + FINGER_STATE_MARGIN
+        )
+        return index_extended and middle_extended and ring_folded and little_folded
 
     def detect(self, landmarks: Sequence[Landmark]) -> Optional[str]:
         """Return one click or drag event, otherwise None."""
@@ -74,6 +116,7 @@ class GestureEngine:
         drag_distance = self._distance(thumb_tip, landmarks[RING_FINGERTIP])
         double_distance = self._distance(thumb_tip, landmarks[LITTLE_FINGERTIP])
         current_time = time.monotonic()
+        scroll_pose = self._is_scroll_pose(landmarks)
 
         # Drag has priority over both click gestures while the ring pinch is held.
         if self._drag_active:
@@ -93,6 +136,38 @@ class GestureEngine:
 
             self.debug_text = "DRAGGING"
             return None
+
+        # Once scrolling starts, it suppresses every click and drag gesture
+        # until the two-up/two-down finger pose is released.
+        if self._scroll_active:
+            if not scroll_pose:
+                self._scroll_active = False
+                self._previous_scroll_y = None
+                self._last_scroll_time = None
+                self.debug_text = "SCROLL END"
+                return SCROLL_END
+
+            current_scroll_y = landmarks[PALM_ANCHOR].y
+            assert self._previous_scroll_y is not None
+            vertical_change = current_scroll_y - self._previous_scroll_y
+            self.debug_text = "SCROLL MODE"
+
+            if abs(vertical_change) < self.scroll_dead_zone:
+                return None
+            if (
+                self._last_scroll_time is not None
+                and current_time - self._last_scroll_time < self.scroll_interval
+            ):
+                return None
+
+            self._previous_scroll_y = current_scroll_y
+            self._last_scroll_time = current_time
+            if vertical_change < 0:
+                self.debug_text = "SCROLL UP"
+                return SCROLL_UP
+
+            self.debug_text = "SCROLL DOWN"
+            return SCROLL_DOWN
 
         # A new thumb-ring pinch begins dragging immediately and only once.
         if drag_distance <= self.pinch_threshold:
@@ -116,6 +191,22 @@ class GestureEngine:
             if double_distance >= self.release_threshold:
                 self._suppress_double_until_release = False
             return None
+
+        no_click_pinch = (
+            left_distance >= self.release_threshold
+            and right_distance >= self.release_threshold
+            and drag_distance >= self.release_threshold
+            and double_distance >= self.release_threshold
+            and not self._left_pinch_active
+            and not self._right_pinch_active
+            and not self._double_pinch_active
+        )
+        if scroll_pose and no_click_pinch:
+            self._scroll_active = True
+            self._previous_scroll_y = landmarks[PALM_ANCHOR].y
+            self._last_scroll_time = current_time
+            self.debug_text = "SCROLL MODE"
+            return SCROLL_START
 
         # Thumb-little is a dedicated, one-shot double click. Keeping this
         # check before right click gives double click priority if ambiguous.
